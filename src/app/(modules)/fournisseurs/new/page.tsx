@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState, FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,10 +15,79 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, Building } from "lucide-react";
+import { createFournisseur } from "@/services/fournisseurService";
+import { NewFournisseur } from "@/types/fournisseur";
 
 export default function NewFournisseurPage() {
+  const router = useRouter();
+  const [formData, setFormData] = useState<NewFournisseur>({
+    nom: "",
+    email: "",
+    telephone: "",
+    adresse: "",
+    note: undefined, // Initialize as undefined for optional field
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    const { id, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [id]: id === "note" ? (value === '' ? undefined : parseFloat(value)) : value,
+    }));
+  };
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    if (formData.note !== undefined && (formData.note < 0 || formData.note > 5)) {
+      setError("La note doit être un nombre entre 0 et 5.");
+      setIsLoading(false);
+      return;
+    }
+    
+    // Basic email validation
+    if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      setError("Veuillez entrer une adresse email valide.");
+      setIsLoading(false);
+      return;
+    }
+
+    // Validate telephone number
+    if (!/^[0-9]{10}$/.test(formData.telephone)) {
+      setError("Le numéro de téléphone doit contenir 10 chiffres.");
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const fournisseurToCreate: NewFournisseur = {
+        nom: formData.nom,
+        email: formData.email,
+        telephone: formData.telephone,
+        adresse: formData.adresse || undefined, // Ensure empty string becomes undefined if desired by backend
+        note: formData.note,
+      };
+      await createFournisseur(fournisseurToCreate);
+      router.push("/fournisseurs");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Une erreur est survenue lors de la création du fournisseur."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 p-4 md:p-8">
       <div className="flex items-center gap-4">
         <Link href="/fournisseurs">
           <Button variant="outline" size="icon" className="h-7 w-7">
@@ -32,43 +103,88 @@ export default function NewFournisseurPage() {
         <CardHeader>
           <CardTitle>Informations du Fournisseur</CardTitle>
           <CardDescription>
-            Remplissez le formulaire pour ajouter un nouveau fournisseur.
+            Remplissez le formulaire ci-dessous pour ajouter un nouveau fournisseur.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="grid gap-6">
+          <form onSubmit={handleSubmit} className="grid gap-6">
             <div className="grid gap-2">
               <Label htmlFor="nom">Nom du Fournisseur</Label>
-              <Input id="nom" placeholder="Ex: Entreprise ABC" />
+              <Input
+                id="nom"
+                placeholder="Ex: Fournisseur XYZ"
+                value={formData.nom}
+                onChange={handleChange}
+                required
+                disabled={isLoading}
+              />
             </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="contactNom">Nom du Contact</Label>
-                <Input id="contactNom" placeholder="Ex: Jean Dupont" />
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="Ex: contact@fournisseur.xyz"
+                  value={formData.email}
+                  onChange={handleChange}
+                  required
+                  disabled={isLoading}
+                />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="contactPrenom">Prénom du Contact (Optionnel)</Label>
-                <Input id="contactPrenom" placeholder="Ex: Marie" />
+                <Label htmlFor="telephone">Téléphone</Label>
+                <Input
+                  id="telephone"
+                  type="tel"
+                  placeholder="Ex: 0123456789"
+                  value={formData.telephone}
+                  onChange={handleChange}
+                  required
+                  disabled={isLoading}
+                />
               </div>
             </div>
+
             <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="contact@entreprise.com" />
+              <Label htmlFor="adresse">Adresse</Label>
+              <Textarea
+                id="adresse"
+                placeholder="Adresse complète du fournisseur..."
+                value={formData.adresse}
+                onChange={handleChange}
+                disabled={isLoading}
+              />
             </div>
+            
             <div className="grid gap-2">
-              <Label htmlFor="telephone">Téléphone</Label>
-              <Input id="telephone" type="tel" placeholder="0123456789" />
+              <Label htmlFor="note">Note (optionnel, 0-5)</Label>
+              <Input
+                id="note"
+                type="number"
+                placeholder="Ex: 4.5"
+                value={formData.note === undefined ? '' : formData.note}
+                onChange={handleChange}
+                min="0"
+                max="5"
+                step="0.1"
+                disabled={isLoading}
+              />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="adresse">Adresse Complète</Label>
-              <Textarea id="adresse" placeholder="123 Rue Principale, Ville, Code Postal, Pays" />
-            </div>
-            {/* Add more fields like site web, notes, etc. */}
-            <div className="flex justify-end gap-2">
+
+            {error && (
+              <p className="text-sm font-medium text-destructive">{error}</p>
+            )}
+            <div className="flex justify-end gap-2 pt-4">
               <Link href="/fournisseurs">
-                <Button variant="outline">Annuler</Button>
+                <Button variant="outline" type="button" disabled={isLoading}>
+                  Annuler
+                </Button>
               </Link>
-              <Button type="submit">Enregistrer Fournisseur</Button>
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? "Enregistrement..." : "Enregistrer Fournisseur"}
+              </Button>
             </div>
           </form>
         </CardContent>
