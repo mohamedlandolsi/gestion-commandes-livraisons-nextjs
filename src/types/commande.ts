@@ -31,16 +31,17 @@ export interface Commande {
 }
 
 export interface NewLigneCommande {
-  produitId: number;
+  produit: { id: number }; // Changed from produitId: number
   quantite: number;
   prixUnitaire: number;
 }
 
 export interface NewCommande {
-  clientId: number;
+  client: { id: number }; // Changed from clientId: number
   lignesCommande: NewLigneCommande[];
   statut?: StatutCommande; // Optional, backend might set default
+  notes?: string; // Added notes field
   // date and montantTotal are usually set by the backend
 }
 
-export type UpdateCommandeData = Partial<Omit<NewCommande, 'clientId' | 'lignesCommande'> & { lignesCommande?: NewLigneCommande[] }>;
+export type UpdateCommandeData = Partial<Omit<NewCommande, 'client' | 'lignesCommande'> & { lignesCommande?: NewLigneCommande[] }>; // Updated to use 'client'

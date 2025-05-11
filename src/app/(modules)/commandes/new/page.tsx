@@ -2,6 +2,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -28,23 +29,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, ShoppingCart, PlusCircle, Trash2, Search } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft, ShoppingCart, PlusCircle, Trash2, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
 
-// Mock data
-const mockClients = [
-  { id: "client_1", nom: "Jean Dupont" },
-  { id: "client_2", nom: "Sophie Martin" },
-];
-
-const mockProduits = [
-  { id: "prod_1", nom: "Ordinateur Portable XPS 15", prix: 1500.99, stock: 50 },
-  { id: "prod_2", nom: "Cafetière Express", prix: 89.50, stock: 120 },
-  { id: "prod_3", nom: "Clavier Mécanique RGB", prix: 120.00, stock: 30 },
-];
+import { Client } from "@/types/client";
+import { Produit } from "@/types/produit";
+import { NewCommande } from "@/types/commande";
+import { createCommande } from "@/services/commandeService";
+import { getClients } from "@/services/clientService";
+import { getProduits } from "@/services/produitService";
 
 interface LigneCommande {
-  produitId: string;
+  produitId: number;
   nom: string;
   quantite: number;
   prixUnitaire: number;
@@ -52,17 +48,78 @@ interface LigneCommande {
 }
 
 export default function NewCommandePage() {
-  const [selectedClientId, setSelectedClientId] = useState<string | undefined>();
+  const router = useRouter();
+
+  const [clients, setClients] = useState<Client[]>([]);
+  const [loadingClients, setLoadingClients] = useState(true);
+  const [errorClients, setErrorClients] = useState<string | null>(null);
+
+  const [produits, setProduits] = useState<Produit[]>([]);
+  const [loadingProduits, setLoadingProduits] = useState(true);
+  const [errorProduits, setErrorProduits] = useState<string | null>(null);
+
+  const [selectedClientId, setSelectedClientId] = useState<number | undefined>();
+  const [dateCommande, setDateCommande] = useState<string>(new Date().toISOString().substring(0, 10));
+  const [notes, setNotes] = useState<string>("");
+
   const [lignesCommande, setLignesCommande] = useState<LigneCommande[]>([]);
-  const [selectedProduitId, setSelectedProduitId] = useState<string | undefined>();
+  const [selectedProduitId, setSelectedProduitId] = useState<number | undefined>();
   const [quantiteProduit, setQuantiteProduit] = useState<number>(1);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchClients = async () => {
+      try {
+        setLoadingClients(true);
+        const data = await getClients();
+        setClients(data || []);
+        setErrorClients(null);
+      } catch (err) {
+        setErrorClients(err instanceof Error ? err.message : "Erreur lors du chargement des clients.");
+        setClients([]);
+      } finally {
+        setLoadingClients(false);
+      }
+    };
+    fetchClients();
+  }, []);
+
+  useEffect(() => {
+    const fetchProduits = async () => {
+      try {
+        setLoadingProduits(true);
+        const data = await getProduits();
+        setProduits(data || []);
+        setErrorProduits(null);
+      } catch (err) {
+        setErrorProduits(err instanceof Error ? err.message : "Erreur lors du chargement des produits.");
+        setProduits([]);
+      } finally {
+        setLoadingProduits(false);
+      }
+    };
+    fetchProduits();
+  }, []);
+
+  useEffect(() => {
+    setQuantiteProduit(1);
+  }, [selectedProduitId]);
 
   const handleAddProduit = () => {
     if (!selectedProduitId || quantiteProduit <= 0) return;
-    const produit = mockProduits.find(p => p.id === selectedProduitId);
+    const produit = produits.find(p => p.id === selectedProduitId);
     if (!produit) return;
 
     const existingLigne = lignesCommande.find(l => l.produitId === selectedProduitId);
+    const currentQuantityInCart = existingLigne ? existingLigne.quantite : 0;
+
+    if ((currentQuantityInCart + quantiteProduit) > produit.stock) {
+      alert(`Stock insuffisant pour ${produit.nom}. Quantité demandée (panier inclus): ${currentQuantityInCart + quantiteProduit}, Stock disponible: ${produit.stock}`);
+      return;
+    }
+
     if (existingLigne) {
       setLignesCommande(lignesCommande.map(l => 
         l.produitId === selectedProduitId 
@@ -85,11 +142,41 @@ export default function NewCommandePage() {
     setQuantiteProduit(1);
   };
 
-  const handleRemoveProduit = (produitId: string) => {
+  const handleRemoveProduit = (produitId: number) => {
     setLignesCommande(lignesCommande.filter(l => l.produitId !== produitId));
   };
 
   const totalCommande = lignesCommande.reduce((acc, curr) => acc + curr.total, 0);
+
+  const selectedProduitDetails = produits.find(p => p.id === selectedProduitId);
+
+  const handleSubmit = async () => {
+    if (!selectedClientId || lignesCommande.length === 0) {
+      setSubmitError("Veuillez sélectionner un client et ajouter au moins un produit.");
+      return;
+    }
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    const newCommandeData: NewCommande = {
+      client: { id: selectedClientId },
+      lignesCommande: lignesCommande.map(l => ({
+        produit: { id: l.produitId },
+        quantite: l.quantite,
+        prixUnitaire: l.prixUnitaire,
+      })),
+      notes: notes || undefined,
+    };
+
+    try {
+      await createCommande(newCommandeData);
+      router.push('/commandes?success=true');
+    } catch (error) {
+      setSubmitError( (error as Error).message || "Erreur lors de la création de la commande." );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -113,16 +200,23 @@ export default function NewCommandePage() {
                     <CardDescription>Ajoutez des produits à la commande.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    {errorProduits && <p className="text-red-500">{errorProduits}</p>}
                     <div className="flex items-end gap-2">
                         <div className="flex-1">
                             <Label htmlFor="produit">Produit</Label>
-                            <Select onValueChange={setSelectedProduitId} value={selectedProduitId}>
+                            <Select 
+                                onValueChange={(value) => setSelectedProduitId(Number(value))} 
+                                value={selectedProduitId?.toString()}
+                                disabled={loadingProduits}
+                            >
                                 <SelectTrigger id="produit">
-                                <SelectValue placeholder="Sélectionner un produit" />
+                                <SelectValue placeholder={loadingProduits ? "Chargement..." : "Sélectionner un produit"} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                {mockProduits.map(p => (
-                                    <SelectItem key={p.id} value={p.id}>{p.nom} (Stock: {p.stock})</SelectItem>
+                                {produits.map(p => (
+                                    <SelectItem key={p.id} value={p.id.toString()} disabled={p.stock === 0}>
+                                        {p.nom} (Stock: {p.stock}) {p.stock === 0 ? "- Épuisé" : ""}
+                                    </SelectItem>
                                 ))}
                                 </SelectContent>
                             </Select>
@@ -135,10 +229,21 @@ export default function NewCommandePage() {
                                 value={quantiteProduit} 
                                 onChange={(e) => setQuantiteProduit(parseInt(e.target.value, 10) || 1)}
                                 min="1"
+                                max={selectedProduitDetails?.stock ?? undefined}
+                                disabled={!selectedProduitId || loadingProduits || (selectedProduitDetails?.stock ?? 0) === 0}
                             />
                         </div>
-                        <Button onClick={handleAddProduit} disabled={!selectedProduitId}>
-                            <PlusCircle className="h-4 w-4 mr-2" /> Ajouter
+                        <Button 
+                            onClick={handleAddProduit} 
+                            disabled={
+                                !selectedProduitId || 
+                                loadingProduits || 
+                                quantiteProduit <= 0 ||
+                                (selectedProduitDetails && selectedProduitDetails.stock < quantiteProduit)
+                            }
+                        >
+                            {loadingProduits ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <PlusCircle className="h-4 w-4 mr-2" />} 
+                            Ajouter
                         </Button>
                     </div>
 
@@ -158,8 +263,8 @@ export default function NewCommandePage() {
                             <TableRow key={ligne.produitId}>
                             <TableCell>{ligne.nom}</TableCell>
                             <TableCell className="text-center">{ligne.quantite}</TableCell>
-                            <TableCell className="text-right">{`$${ligne.prixUnitaire.toFixed(2)}`}</TableCell>
-                            <TableCell className="text-right">{`$${ligne.total.toFixed(2)}`}</TableCell>
+                            <TableCell className="text-right">{`€${ligne.prixUnitaire.toFixed(2)}`}</TableCell> 
+                            <TableCell className="text-right">{`€${ligne.total.toFixed(2)}`}</TableCell>
                             <TableCell className="text-right">
                                 <Button variant="ghost" size="icon" onClick={() => handleRemoveProduit(ligne.produitId)}>
                                 <Trash2 className="h-4 w-4 text-destructive" />
@@ -175,7 +280,7 @@ export default function NewCommandePage() {
                     )}
                 </CardContent>
                 <CardFooter className="flex justify-end font-semibold text-lg">
-                    Total Commande: ${totalCommande.toFixed(2)}
+                    Total Commande: €{totalCommande.toFixed(2)}
                 </CardFooter>
             </Card>
         </div>
@@ -186,30 +291,59 @@ export default function NewCommandePage() {
                     <CardTitle>Client et Informations</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    {errorClients && <p className="text-red-500">{errorClients}</p>}
                     <div>
                         <Label htmlFor="client">Client</Label>
-                        <Select onValueChange={setSelectedClientId} value={selectedClientId}>
+                        <Select 
+                            onValueChange={(value) => setSelectedClientId(Number(value))} 
+                            value={selectedClientId?.toString()}
+                            disabled={loadingClients}
+                        >
                             <SelectTrigger id="client">
-                            <SelectValue placeholder="Sélectionner un client" />
+                            <SelectValue placeholder={loadingClients ? "Chargement..." : "Sélectionner un client"} />
                             </SelectTrigger>
                             <SelectContent>
-                            {mockClients.map(c => (
-                                <SelectItem key={c.id} value={c.id}>{c.nom}</SelectItem>
+                            {clients.map(c => (
+                                <SelectItem key={c.id} value={c.id.toString()}>{c.nom}</SelectItem>
                             ))}
                             </SelectContent>
                         </Select>
                     </div>
                     <div>
                         <Label htmlFor="dateCommande">Date de Commande</Label>
-                        <Input id="dateCommande" type="date" defaultValue={new Date().toISOString().substring(0, 10)} />
+                        <Input 
+                            id="dateCommande" 
+                            type="date" 
+                            value={dateCommande} 
+                            onChange={(e) => setDateCommande(e.target.value)} 
+                            disabled
+                        />
                     </div>
                     <div>
                         <Label htmlFor="notes">Notes (Optionnel)</Label>
-                        <Input id="notes" placeholder="Instructions spéciales, etc."/>
+                        <Input 
+                            id="notes" 
+                            placeholder="Instructions spéciales, etc." 
+                            value={notes}
+                            onChange={(e) => setNotes(e.target.value)}
+                        />
                     </div>
                 </CardContent>
             </Card>
-            <Button type="submit" size="lg" className="w-full" disabled={!selectedClientId || lignesCommande.length === 0}>
+            {submitError && <p className="text-red-500 text-sm">{submitError}</p>}
+            <Button 
+                onClick={handleSubmit} 
+                size="lg" 
+                className="w-full" 
+                disabled={
+                    !selectedClientId || 
+                    lignesCommande.length === 0 || 
+                    isSubmitting || 
+                    loadingClients || 
+                    loadingProduits
+                }
+            >
+                {isSubmitting ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : null}
                 Enregistrer la Commande
             </Button>
             <Link href="/commandes" className="w-full">
