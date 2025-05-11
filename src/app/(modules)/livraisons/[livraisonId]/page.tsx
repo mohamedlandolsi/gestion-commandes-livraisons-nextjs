@@ -3,7 +3,7 @@
 import { useState, useEffect, FormEvent } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Edit, Loader2, Save, XCircle } from "lucide-react";
+import { ArrowLeft, Edit, Loader2, Save, XCircle, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +25,7 @@ import {
 import { Livraison, UpdateLivraisonData, StatutLivraison } from "@/types/livraison";
 import { Transporteur } from "@/types/transporteur";
 import { Commande } from "@/types/commande";
-import { getLivraisonById, updateLivraison } from "@/services/livraisonService";
+import { getLivraisonById, updateLivraison, ApiError, deleteLivraison } from "@/services/livraisonService";
 import { getAllTransporteurs } from "@/services/transporteurService";
 import { toast } from "sonner";
 
@@ -40,6 +40,7 @@ export default function LivraisonDetailPage() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
 
@@ -70,7 +71,12 @@ export default function LivraisonDetailPage() {
         setTransporteurs(transporteursData);
       } catch (err) {
         console.error("Failed to fetch livraison details:", err);
-        const errorMessage = err instanceof Error ? err.message : "Erreur inconnue";
+        let errorMessage = "Erreur inconnue";
+        if (err instanceof ApiError) {
+          errorMessage = err.data?.message || err.data?.error || err.message;
+        } else if (err instanceof Error) {
+          errorMessage = err.message;
+        }
         setError(`Impossible de charger les détails de la livraison: ${errorMessage}`);
         toast.error("Erreur de Chargement", {
           description: `Impossible de charger les détails: ${errorMessage}`,
@@ -95,6 +101,7 @@ export default function LivraisonDetailPage() {
 
   const handleCancelEdit = () => {
     setIsEditing(false);
+    setError(null);
   };
 
   const getCurrentDateTimeLocal = () => {
@@ -117,29 +124,116 @@ export default function LivraisonDetailPage() {
     }
 
     const updatedData: UpdateLivraisonData = {
+      commandeId: livraison.commande?.id, // Add this line
       dateLivraison: new Date(editableDateLivraison).toISOString(),
       adresseLivraison: editableAdresseLivraison,
       cout: parseFloat(editableCout),
-      transporteurId: editableTransporteurId ? parseInt(editableTransporteurId) : null,
+      transporteurId: (editableTransporteurId && editableTransporteurId !== "__NONE__")
+        ? parseInt(editableTransporteurId)
+        : null,
     };
+
+    if (!updatedData.commandeId) {
+      setError("L'ID de la commande est manquant. Impossible de mettre à jour la livraison.");
+      toast.error("Erreur de Mise à Jour", {
+        description: "L'ID de la commande est manquant.",
+      });
+      setIsSaving(false);
+      return;
+    }
 
     try {
       const updated = await updateLivraison(livraison.id, updatedData);
       setLivraison(updated);
-      setCommande(updated.commande);
+      if (updated.commande) {
+        setCommande(updated.commande);
+      }
       setIsEditing(false);
       toast.success("Livraison Mise à Jour", {
         description: "Les détails de la livraison ont été mis à jour avec succès.",
       });
-    } catch (err) {
-      console.error("Failed to update livraison:", err);
-      const errorMessage = err instanceof Error ? err.message : "Une erreur inconnue est survenue.";
-      setError(`Erreur lors de la mise à jour: ${errorMessage}`);
+    } catch (err: any) { 
+      console.error("Failed to update livraison (raw error object):", err);
+      let errorMessage: string;
+
+      if (err instanceof ApiError) {
+        console.error("Backend validation data (err.data):", err.data);
+        // Default to ApiError's own message (e.g., "Validation failed")
+        errorMessage = err.message; 
+
+        // If err.data is a non-empty object, try to get a more specific message
+        if (err.data && typeof err.data === "object" && Object.keys(err.data).length > 0) {
+          if (err.data.errors && Array.isArray(err.data.errors) && err.data.errors.length > 0) {
+            // Check if the elements are objects with a 'message' field
+            if (typeof err.data.errors[0] === 'object' && err.data.errors[0] !== null && 'message' in err.data.errors[0]) {
+              errorMessage = err.data.errors
+                .map((e: any) => `${e.field ? e.field + ': ' : ''}${e.message}`)
+                .join("; ");
+            } else { // If errors is an array of strings or other non-object types
+              const stringErrors = err.data.errors.filter((e: any) => typeof e === 'string');
+              if (stringErrors.length > 0) {
+                errorMessage = stringErrors.join("; ");
+              }
+              // If no string errors, errorMessage remains err.message (already set)
+            }
+          } else if (err.data.message && typeof err.data.message === 'string') {
+            errorMessage = err.data.message;
+          } else if (err.data.error && typeof err.data.error === 'string') {
+            errorMessage = err.data.error;
+          }
+          // If err.data is a non-empty object but doesn't have a more specific message 
+          // in .errors, .message, or .error, errorMessage remains err.message.
+        }
+        // If err.data is null, undefined, or an empty object {}, errorMessage remains err.message.
+        
+      } else if (err instanceof Error) {
+        errorMessage = err.message;
+      } else {
+        errorMessage = "Une erreur inconnue est survenue lors de la mise à jour.";
+      }
+      
+      setError(`Erreur: ${errorMessage}`);
       toast.error("Erreur de Mise à Jour", {
-        description: `Impossible de mettre à jour la livraison: ${errorMessage}`,
+        description: errorMessage, 
       });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!livraison) return;
+
+    const confirmed = window.confirm("Êtes-vous sûr de vouloir supprimer cette livraison ? Cette action est irréversible.");
+    if (!confirmed) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setError(null);
+
+    try {
+      await deleteLivraison(livraison.id);
+      toast.success("Livraison Supprimée", {
+        description: `La livraison LIV-${String(livraison.id).padStart(4, "0")} a été supprimée avec succès.`,
+      });
+      router.push("/livraisons");
+    } catch (err: any) {
+      console.error("Failed to delete livraison:", err);
+      let errorMessage: string;
+      if (err instanceof ApiError) {
+        errorMessage = err.data?.message || err.data?.error || err.message;
+      } else if (err instanceof Error) {
+        errorMessage = err.message;
+      } else {
+        errorMessage = "Une erreur inconnue est survenue lors de la suppression.";
+      }
+      setError(`Erreur: ${errorMessage}`);
+      toast.error("Erreur de Suppression", {
+        description: errorMessage,
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -204,18 +298,37 @@ export default function LivraisonDetailPage() {
                   : "Consultez les informations de la livraison."}
               </CardDescription>
             </div>
-            {!isEditing &&
-              livraison.statut !== StatutLivraison.LIVREE &&
-              livraison.statut !== StatutLivraison.ANNULEE && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleEditToggle}
-                  disabled={isSaving}
-                >
-                  <Edit className="mr-2 h-4 w-4" /> Modifier
-                </Button>
-              )}
+            <div className="flex gap-2">
+              {!isEditing &&
+                livraison.statut !== StatutLivraison.LIVREE &&
+                livraison.statut !== StatutLivraison.ANNULEE && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleEditToggle}
+                    disabled={isSaving || isDeleting}
+                  >
+                    <Edit className="mr-2 h-4 w-4" /> Modifier
+                  </Button>
+                )}
+              {!isEditing &&
+                livraison.statut !== StatutLivraison.LIVREE &&
+                livraison.statut !== StatutLivraison.ANNULEE && (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={handleDelete}
+                    disabled={isSaving || isDeleting}
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="mr-2 h-4 w-4" />
+                    )}
+                    Supprimer
+                  </Button>
+                )}
+            </div>
           </CardHeader>
           <CardContent className="space-y-6">
             {error && !isEditing && (
@@ -346,10 +459,10 @@ export default function LivraisonDetailPage() {
                     <SelectValue placeholder="Sélectionner un transporteur" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Aucun / Non assigné</SelectItem>
+                    <SelectItem value="__NONE__">Aucun / Non assigné</SelectItem>
                     {transporteurs.map((transporteur) => (
                       <SelectItem key={transporteur.id} value={transporteur.id.toString()}>
-                        {transporteur.nom} ({transporteur.typeVehicule || "N/A"})
+                        {transporteur.nom}
                       </SelectItem>
                     ))}
                     {transporteurs.length === 0 && (
@@ -363,7 +476,7 @@ export default function LivraisonDetailPage() {
                 <Input
                   value={
                     livraison.transporteur
-                      ? `${livraison.transporteur.nom} (${livraison.transporteur.typeVehicule || "N/A"})`
+                      ? `${livraison.transporteur.nom}`
                       : "Non assigné"
                   }
                   readOnly

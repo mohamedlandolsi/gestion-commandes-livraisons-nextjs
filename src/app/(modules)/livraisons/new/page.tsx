@@ -109,32 +109,47 @@ export default function NewLivraisonPage() {
       });
       router.push("/livraisons");
     } catch (error: any) {
-      console.error("Failed to create livraison:", error);
-      let detailedErrorMessage = "Une erreur inconnue est survenue.";
+      console.error("Failed to create livraison (raw error object):", error);
+      let detailedErrorMessage: string;
 
-      if (error instanceof ApiError && error.data) {
-        const errorData = error.data;
-        if (errorData.errors && Array.isArray(errorData.errors)) {
-          // Handle Spring Boot validation errors (field and message)
-          detailedErrorMessage = errorData.errors.map((err: { field: string; message: string }) => 
-            `${err.field}: ${err.message}`).join("; \n");
-          detailedErrorMessage = `Erreurs de validation: \n${detailedErrorMessage}`;
-        } else if (errorData.error && errorData.message) {
-          // Handle general structured errors { error: "Type", message: "Details" }
-          detailedErrorMessage = `${errorData.error}: ${errorData.message}`;
-        } else if (errorData.message) {
-           // Handle errors like { message: "Details" } or the general message from validation failure
-          detailedErrorMessage = errorData.message;
-        } else if (typeof errorData === 'string') {
-          detailedErrorMessage = errorData;
+      if (error instanceof ApiError) {
+        console.error("Backend validation data (error.data):", error.data);
+        // Default to ApiError's own message (e.g., "Validation failed" or specific message from handleResponse)
+        detailedErrorMessage = error.message; 
+
+        // If error.data is a non-empty object, try to get a more specific message
+        if (error.data && typeof error.data === "object" && Object.keys(error.data).length > 0) {
+          const errorData = error.data;
+          if (errorData.errors && Array.isArray(errorData.errors) && errorData.errors.length > 0 &&
+              typeof errorData.errors[0] === 'object' && errorData.errors[0] !== null && 'message' in errorData.errors[0]) {
+            // Handle Spring Boot validation errors (field and message)
+            detailedErrorMessage = errorData.errors
+              .map((err: { field: string; message: string }) => `${err.field ? err.field + ': ' : ''}${err.message}`)
+              .join("; ");
+          } else if (errorData.error && typeof errorData.error === 'string' && errorData.message && typeof errorData.message === 'string') {
+            // Handle general structured errors { error: "Type", message: "Details" }
+            detailedErrorMessage = `${errorData.error}: ${errorData.message}`;
+          } else if (errorData.message && typeof errorData.message === 'string') {
+            // Handle errors like { message: "Details" } or if only message is present from the above case
+            detailedErrorMessage = errorData.message;
+          } else if (errorData.error && typeof errorData.error === 'string') {
+            // Handle if only error field is present
+            detailedErrorMessage = errorData.error;
+          }
+          // If error.data is a non-empty object but doesn't match these known structures, 
+          // detailedErrorMessage remains the initial error.message.
         }
-      } else if (error.message) { // Fallback for other types of errors
+        // If error.data is null, undefined, or an empty object {}, detailedErrorMessage remains error.message.
+        
+      } else if (error instanceof Error) { // Fallback for other client-side JS errors
         detailedErrorMessage = error.message;
+      } else { // Fallback for unknown errors
+        detailedErrorMessage = "Une erreur inconnue est survenue lors de la création.";
       }
-
+      
       setFormError(`Erreur lors de la création de la livraison: ${detailedErrorMessage}`);
       toast.error("Erreur de Création", {
-        description: detailedErrorMessage,
+        description: detailedErrorMessage, 
       });
     } finally {
       setLoadingSubmit(false);
@@ -230,7 +245,7 @@ export default function NewLivraisonPage() {
                     )}
                     {transporteurs.map((transporteur) => (
                       <SelectItem key={transporteur.id} value={transporteur.id.toString()}>
-                        {transporteur.nom} ({transporteur.typeVehicule || 'N/A'})
+                        {transporteur.nom}
                       </SelectItem>
                     ))}
                   </SelectContent>

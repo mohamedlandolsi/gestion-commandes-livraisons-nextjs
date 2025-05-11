@@ -1,5 +1,7 @@
 // src/types/transporteur.ts
 
+// The TypeVehicule enum can be kept if used for UI filtering/display,
+// but it's not part of the backend Transporteur model.
 export enum TypeVehicule {
   CAMION = "CAMION",
   FOURGONNETTE = "FOURGONNETTE",
@@ -12,25 +14,21 @@ export enum TypeVehicule {
 export interface Transporteur {
   id: number;
   nom: string;
-  contact?: string | null;
-  typeVehicule?: TypeVehicule | null;
-  capaciteKg?: number | null;
-  disponible: boolean;
-  // Add any other fields that your backend Transporteur model might have
+  telephone?: string | null; // Changed from contact, matches backend
+  note?: number | null;      // Added, matches backend
+  // Removed typeVehicule, capaciteKg, disponible as they are not in the backend model
 }
 
 export interface NewTransporteur {
-  nom: string;
-  contact?: string | null;
-  typeVehicule?: TypeVehicule | null;
-  capaciteKg?: number | null;
-  disponible?: boolean; // Defaults to true or as per backend logic
+  nom: string; // Backend has @NotBlank for nom
+  telephone?: string | null;
+  note?: number | null;
+  // Removed typeVehicule, capaciteKg, disponible
 }
 
 export interface UpdateTransporteurData {
   nom?: string;
-  contact?: string | null;
-  typeVehicule?: TypeVehicule | null;
-  capaciteKg?: number | null;
-  disponible?: boolean;
+  telephone?: string | null;
+  note?: number | null;
+  // Removed typeVehicule, capaciteKg, disponible
 }
