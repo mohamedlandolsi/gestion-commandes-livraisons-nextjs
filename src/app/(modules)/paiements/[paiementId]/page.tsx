@@ -1,96 +1,202 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Edit, Trash2, CreditCard, CalendarDays, UserCircle, FileText } from "lucide-react";
-import Link from "next/link";
-import { useParams } from "next/navigation";
+import React, { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { toast } from 'sonner';
+import { format } from 'date-fns';
 
-// Mock data for a single payment - replace with API call
-const mockPayment = {
-  id: "PAY001",
-  commandeId: "CMD001",
-  montant: 150.75,
-  datePaiement: "2024-07-20",
-  methodePaiement: "Carte de Crédit",
-  statut: "Complété",
-  client: {
-    id: "CLI001",
-    nom: "Jean Dupont",
-  },
-  factureId: "FACT2024-001",
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ArrowLeft, AlertTriangle, Info, Edit } from 'lucide-react';
+
+import * as paiementService from '@/services/paiementService';
+import { type Paiement, StatutPaiement, ModePaiement } from '@/types/paiement';
+import { Badge } from '@/components/ui/badge';
+
+const StatutPaiementDisplay: Record<StatutPaiement, string> = {
+  [StatutPaiement.EN_ATTENTE]: 'En attente',
+  [StatutPaiement.EFFECTUE]: 'Effectué',
+  [StatutPaiement.ECHEC]: 'Échec',
+  [StatutPaiement.REMBOURSE]: 'Remboursé',
+};
+
+const getStatutBadgeVariant = (statut: StatutPaiement): "default" | "secondary" | "destructive" | "outline" => {
+    switch (statut) {
+        case StatutPaiement.EFFECTUE:
+            return "default";
+        case StatutPaiement.EN_ATTENTE:
+            return "secondary";
+        case StatutPaiement.ECHEC:
+            return "destructive";
+        case StatutPaiement.REMBOURSE:
+            return "outline";
+        default:
+            return "secondary";
+    }
+};
+
+const ModePaiementDisplay: Record<ModePaiement, string> = {
+  [ModePaiement.CARTE_CREDIT]: 'Carte de crédit',
+  [ModePaiement.VIREMENT]: 'Virement bancaire',
+  [ModePaiement.PAYPAL]: 'PayPal',
+  [ModePaiement.ESPECES]: 'Espèces',
+  [ModePaiement.CHEQUE]: 'Chèque',
 };
 
 export default function PaiementDetailPage() {
+  const router = useRouter();
   const params = useParams();
-  const paiementId = params.paiementId as string;
+  const paiementIdStr = params.paiementId as string;
 
-  // In a real app, you would fetch payment details based on paiementId
-  const payment = mockPayment; // Using mock data for now
+  const [paiement, setPaiement] = useState<Paiement | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!payment) {
-    return <div>Paiement non trouvé</div>;
+  useEffect(() => {
+    if (paiementIdStr) {
+      const paiementIdNum = parseInt(paiementIdStr, 10);
+      if (isNaN(paiementIdNum)){
+        setError("ID de paiement invalide.");
+        toast.error("ID de paiement invalide.");
+        setIsLoading(false);
+        return;
+      }
+      const fetchPaiement = async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+          const data = await paiementService.getPaiementById(paiementIdNum);
+          setPaiement(data);
+        } catch (err: any) {
+          console.error("Failed to fetch paiement details:", err);
+          const errorMessage = err.response?.data?.message || err.message || "Impossible de charger les détails du paiement.";
+          setError(errorMessage);
+          toast.error(errorMessage);
+        }
+        setIsLoading(false);
+      };
+      fetchPaiement();
+    }
+  }, [paiementIdStr]);
+
+  const handleRetry = () => {
+    if (paiementIdStr) {
+      const paiementIdNum = parseInt(paiementIdStr, 10);
+       if (isNaN(paiementIdNum)){
+        setError("ID de paiement invalide.");
+        toast.error("ID de paiement invalide.");
+        return;
+      }
+      setIsLoading(true);
+      setError(null);
+      paiementService.getPaiementById(paiementIdNum)
+        .then(setPaiement)
+        .catch((err: any) => {
+          console.error("Failed to fetch paiement details:", err);
+          const errorMessage = err.response?.data?.message || err.message || "Impossible de charger les détails du paiement.";
+          setError(errorMessage);
+          toast.error(errorMessage);
+        })
+        .finally(() => setIsLoading(false));
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="container mx-auto p-4 flex justify-center items-center min-h-[calc(100vh-10rem)]">
+        <p className="text-lg text-muted-foreground">Chargement des détails du paiement...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-4">
+        <Alert variant="destructive" className="max-w-2xl mx-auto">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Erreur</AlertTitle>
+          <AlertDescription>
+            {error} <Button variant="link" onClick={handleRetry} className="p-0 h-auto underline">Réessayer</Button>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  if (!paiement) {
+    return (
+      <div className="container mx-auto p-4">
+        <Alert className="max-w-2xl mx-auto">
+          <Info className="h-4 w-4" />
+          <AlertTitle>Information</AlertTitle>
+          <AlertDescription>
+            Aucun détail de paiement trouvé pour l'ID #{paiementIdStr}. Il se peut qu'il n'existe pas ou qu'il ait été supprimé.
+            <Button variant="link" asChild className="p-0 h-auto ml-1 underline">
+                <Link href="/paiements">Retour à la liste</Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-4">
-        <Link href="/paiements">
-          <Button variant="outline" size="icon">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
-        <h1 className="text-2xl font-semibold">Détails du Paiement: {payment.id}</h1>
-      </div>
-
-      <Card>
+    <div className="container mx-auto p-4">
+      <Card className="max-w-3xl mx-auto shadow-lg">
         <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Paiement {payment.id}</span>
-            <Badge variant={payment.statut === "Complété" ? "default" : payment.statut === "En attente" ? "secondary" : "destructive"}>
-              {payment.statut}
-            </Badge>
+          <div className="flex items-center justify-between mb-2">
+            <Button variant="outline" size="sm" onClick={() => router.push('/paiements')}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Retour à la liste
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => router.push(`/paiements/edit/${paiement.id}`)}>
+                <Edit className="mr-2 h-4 w-4" />
+                Modifier
+            </Button>
+          </div>
+          <CardTitle className="text-2xl font-bold">
+            Détails du Paiement #{paiement.id}
           </CardTitle>
-          <CardDescription>Référence Commande: {payment.commandeId}</CardDescription>
+          <CardDescription>
+            Informations complètes concernant le paiement sélectionné.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium text-muted-foreground flex items-center"><CreditCard className="w-4 h-4 mr-2" />Montant Payé</span>
-              <p className="text-lg font-semibold">{payment.montant.toFixed(2)} €</p>
+        <CardContent className="space-y-6 pt-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+            <div>
+              <h4 className="text-lg font-semibold mb-2 text-primary">Informations Générales</h4>
+              <div className="space-y-1.5">
+                <p><strong>ID Paiement:</strong> {paiement.id}</p>
+                <p><strong>Date:</strong> {format(new Date(paiement.date), 'dd/MM/yyyy HH:mm:ss')}</p>
+                <p><strong>Montant Payé:</strong> <span className="font-semibold text-lg">{paiement.montantPaye?.toFixed(2) ?? 'N/A'} €</span></p>
+                <p><strong>Statut:</strong> <Badge variant={getStatutBadgeVariant(paiement.statut)}>{StatutPaiementDisplay[paiement.statut]}</Badge></p>
+                <p><strong>Mode de Paiement:</strong> {ModePaiementDisplay[paiement.mode]}</p>
+              </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium text-muted-foreground flex items-center"><CalendarDays className="w-4 h-4 mr-2" />Date de Paiement</span>
-              <p>{new Date(payment.datePaiement).toLocaleDateString()}</p>
+            <div>
+              <h4 className="text-lg font-semibold mb-2 text-primary">Informations sur la Commande</h4>
+              {paiement.commande ? (
+                <div className="space-y-1.5">
+                  <p><strong>ID Commande:</strong> <Link href={`/commandes/${paiement.commande.id}`} className="text-blue-600 hover:underline">#{paiement.commande.id}</Link></p>
+                  <p><strong>Montant Total Commande:</strong> {paiement.commande.montantTotal?.toFixed(2) ?? 'N/A'} €</p>
+                  {paiement.commande.client && (
+                    <div className="mt-3 pt-3 border-t">
+                      <h5 className="font-medium mb-1">Client Associé</h5>
+                      <p><strong>ID Client:</strong> <Link href={`/clients/${paiement.commande.client.id}`} className="text-blue-600 hover:underline">#{paiement.commande.client.id}</Link></p>
+                      <p><strong>Nom Client:</strong> {paiement.commande.client.nom}</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-muted-foreground">Aucune information de commande disponible.</p>
+              )}
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium text-muted-foreground flex items-center"><UserCircle className="w-4 h-4 mr-2" />Client</span>
-              <p>{payment.client.nom} (ID: {payment.client.id})</p>
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium text-muted-foreground">Méthode de Paiement</span>
-              <p>{payment.methodePaiement}</p>
-            </div>
-          </div>
-           {payment.factureId && (
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium text-muted-foreground flex items-center"><FileText className="w-4 h-4 mr-2" />Facture Associée</span>
-              <Link href={`/factures/${payment.factureId}`} className="text-blue-600 hover:underline">
-                {payment.factureId}
-              </Link>
-            </div>
-          )}
         </CardContent>
-        <CardFooter className="flex justify-end gap-2">
-          <Button variant="outline">
-            <Edit className="mr-2 h-4 w-4" /> Modifier
-          </Button>
-          <Button variant="destructive">
-            <Trash2 className="mr-2 h-4 w-4" /> Supprimer
-          </Button>
+        <CardFooter className="mt-6">
+            {/* Actions like Process Payment or Update Status could be added here if applicable directly on detail page */}
         </CardFooter>
       </Card>
     </div>
