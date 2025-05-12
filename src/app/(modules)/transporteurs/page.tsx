@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { PlusCircle, Search, MoreHorizontal, FileText, Edit, Trash2, Truck } from "lucide-react";
+import { PlusCircle, Search, MoreHorizontal, FileText, Edit, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Transporteur } from "@/types/transporteur";
+import {
+  getAllTransporteurs,
+  deleteTransporteur,
+  searchTransporteurs,
+} from "@/services/transporteurService";
+import { toast } from "sonner";
 import {
   Table,
   TableBody,
@@ -22,32 +30,54 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-// Mock data for transporteurs
-const transporteurs = [
-  {
-    id: "TRN001",
-    nom: "SpeedyTrans",
-    contact: "contact@speedytrans.com",
-    telephone: "0123456789",
-    statut: "Actif",
-  },
-  {
-    id: "TRN002",
-    nom: "Reliable Carriers",
-    contact: "info@reliablecarriers.co",
-    telephone: "0987654321",
-    statut: "Actif",
-  },
-  {
-    id: "TRN003",
-    nom: "Global Logistics",
-    contact: "support@globallogistics.com",
-    telephone: "0555123456",
-    statut: "Inactif",
-  },
-];
-
 export default function TransporteursPage() {
+  const [transporteurs, setTransporteurs] = useState<Transporteur[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchTransporteurs = async (query?: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = query
+        ? await searchTransporteurs(query)
+        : await getAllTransporteurs();
+      setTransporteurs(data);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Une erreur est survenue lors de la récupération des transporteurs.";
+      setError(errorMessage);
+      toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTransporteurs();
+  }, []);
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.target.value);
+  };
+
+  const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    fetchTransporteurs(searchTerm);
+  };
+  
+  const handleDelete = async (id: number) => {
+    if (window.confirm("Êtes-vous sûr de vouloir supprimer ce transporteur ?")) {
+      try {
+        await deleteTransporteur(id);
+        toast.success("Transporteur supprimé avec succès.");
+        fetchTransporteurs(searchTerm); // Refresh the list
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Erreur lors de la suppression du transporteur.");
+      }
+    }
+  };
+
   return (
     <main className="flex flex-1 flex-col gap-4 p-4 md:gap-8 md:p-8">
       <Card>
@@ -59,14 +89,16 @@ export default function TransporteursPage() {
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between gap-4 mb-6">
-            <div className="relative flex-1 md:grow-0">
+            <form onSubmit={handleSearchSubmit} className="relative flex-1 md:grow-0">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 type="search"
                 placeholder="Rechercher un transporteur..."
                 className="w-full rounded-lg bg-background pl-8 md:w-[200px] lg:w-[336px]"
+                value={searchTerm}
+                onChange={handleSearchChange}
               />
-            </div>
+            </form>
             <Link href="/transporteurs/new">
               <Button size="sm" className="h-8 gap-1">
                 <PlusCircle className="h-3.5 w-3.5" />
@@ -81,26 +113,41 @@ export default function TransporteursPage() {
               <TableRow>
                 <TableHead>ID</TableHead>
                 <TableHead>Nom</TableHead>
-                <TableHead>Contact</TableHead>
                 <TableHead>Téléphone</TableHead>
-                <TableHead>Statut</TableHead>
+                <TableHead>Note</TableHead>
                 <TableHead>
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {transporteurs.map((transporteur) => (
+              {isLoading && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center">
+                    Chargement...
+                  </TableCell>
+                </TableRow>
+              )}
+              {error && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-red-500">
+                    {error}
+                  </TableCell>
+                </TableRow>
+              )}
+              {!isLoading && !error && transporteurs.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center">
+                    Aucun transporteur trouvé.
+                  </TableCell>
+                </TableRow>
+              )}
+              {!isLoading && !error && transporteurs.map((transporteur) => (
                 <TableRow key={transporteur.id}>
                   <TableCell className="font-medium">{transporteur.id}</TableCell>
                   <TableCell>{transporteur.nom}</TableCell>
-                  <TableCell>{transporteur.contact}</TableCell>
-                  <TableCell>{transporteur.telephone}</TableCell>
-                  <TableCell>
-                    <Badge variant={transporteur.statut === "Actif" ? "default" : "outline"}>
-                      {transporteur.statut}
-                    </Badge>
-                  </TableCell>
+                  <TableCell>{transporteur.telephone || "N/A"}</TableCell>
+                  <TableCell>{transporteur.note !== null && transporteur.note !== undefined ? transporteur.note : "N/A"}</TableCell>
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -117,13 +164,13 @@ export default function TransporteursPage() {
                             Détails
                           </DropdownMenuItem>
                         </Link>
-                        <Link href={`/transporteurs/${transporteur.id}/edit`}> {/* Assuming an edit page */}
+                        <Link href={`/transporteurs/${transporteur.id}/edit`}>
                           <DropdownMenuItem>
                             <Edit className="mr-2 h-4 w-4" />
                             Modifier
                           </DropdownMenuItem>
                         </Link>
-                        <DropdownMenuItem className="text-red-600">
+                        <DropdownMenuItem className="text-red-600" onClick={() => handleDelete(transporteur.id!)}>
                           <Trash2 className="mr-2 h-4 w-4" />
                           Supprimer
                         </DropdownMenuItem>
